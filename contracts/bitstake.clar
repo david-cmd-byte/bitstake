@@ -73,3 +73,85 @@
     quorum-required: uint,
   }
 )
+
+;; User Voting Records (prevents double voting)
+(define-map VotingRecords
+  {
+    voter: principal,
+    proposal-id: uint,
+  }
+  {
+    vote-cast: bool,
+    voting-power-used: uint,
+  }
+)
+
+;; Tier System Configuration
+(define-map TierConfiguration
+  uint
+  {
+    minimum-stake: uint,
+    reward-multiplier: uint,
+    governance-weight: uint,
+    features-unlocked: uint,
+  }
+)
+
+;; PUBLIC FUNCTIONS
+
+;; ----------------------------- Contract Initialization -------------------------
+(define-public (initialize-protocol)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+
+    ;; Initialize tier system
+    (map-set TierConfiguration u1 {
+      minimum-stake: u1000000,
+      reward-multiplier: u100,
+      governance-weight: u1,
+      features-unlocked: u1,
+    })
+    (map-set TierConfiguration u2 {
+      minimum-stake: u5000000,
+      reward-multiplier: u125,
+      governance-weight: u2,
+      features-unlocked: u3,
+    })
+    (map-set TierConfiguration u3 {
+      minimum-stake: u10000000,
+      reward-multiplier: u150,
+      governance-weight: u3,
+      features-unlocked: u7,
+    })
+    (map-set TierConfiguration u4 {
+      minimum-stake: u25000000,
+      reward-multiplier: u200,
+      governance-weight: u5,
+      features-unlocked: u15,
+    })
+
+    (print {
+      event: "protocol-initialized",
+      timestamp: stacks-block-height,
+    })
+    (ok true)
+  )
+)
+
+;; ------------------------------- Staking Operations ---------------------------
+(define-public (stake-stx
+    (amount uint)
+    (lock-months uint)
+  )
+  (let (
+      (existing-position (map-get? StakingPositions tx-sender))
+      (lock-blocks (blocks-from-months lock-months))
+      (tier-info (calculate-tier-level amount))
+      (lock-multiplier (calculate-lock-multiplier lock-months))
+      (final-multiplier (* (get reward-multiplier tier-info) lock-multiplier))
+    )
+    ;; Validations
+    (asserts! (not (var-get contract-paused)) ERR-CONTRACT-PAUSED)
+    (asserts! (>= amount (var-get minimum-stake)) ERR-MINIMUM-NOT-MET)
+    (asserts! (is-valid-lock-period lock-months) ERR-INVALID-AMOUNT)
+    (asserts! (is-none existing-position) ERR-INVALID-AMOUNT)
