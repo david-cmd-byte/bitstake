@@ -308,3 +308,86 @@
     (ok proposal-id)
   )
 )
+
+(define-public (vote-on-proposal
+    (proposal-id uint)
+    (support bool)
+  )
+  (let (
+      (proposal (unwrap! (map-get? GovernanceProposals { proposal-id: proposal-id })
+        ERR-INVALID-PROPOSAL
+      ))
+      (position (unwrap! (map-get? StakingPositions tx-sender) ERR-UNAUTHORIZED))
+      (voting-power (calculate-voting-power position))
+      (existing-vote (map-get? VotingRecords {
+        voter: tx-sender,
+        proposal-id: proposal-id,
+      }))
+    )
+    (asserts! (< stacks-block-height (get voting-end proposal)) ERR-VOTING-CLOSED)
+    (asserts! (is-none existing-vote) ERR-UNAUTHORIZED)
+
+    ;; Record vote
+    (map-set VotingRecords {
+      voter: tx-sender,
+      proposal-id: proposal-id,
+    } {
+      vote-cast: true,
+      voting-power-used: voting-power,
+    })
+
+    ;; Update proposal vote counts
+    (map-set GovernanceProposals { proposal-id: proposal-id }
+      (merge proposal {
+        votes-for: (if support
+          (+ (get votes-for proposal) voting-power)
+          (get votes-for proposal)
+        ),
+        votes-against: (if support
+          (get votes-against proposal)
+          (+ (get votes-against proposal) voting-power)
+        ),
+      })
+    )
+
+    (print {
+      event: "vote-cast",
+      proposal-id: proposal-id,
+      voter: tx-sender,
+      support: support,
+    })
+    (ok true)
+  )
+)
+
+;; ---------------------------- Administrative Functions --------------------------
+(define-public (pause-contract)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    (var-set contract-paused true)
+    (print { event: "contract-paused" })
+    (ok true)
+  )
+)
+
+(define-public (resume-contract)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    (var-set contract-paused false)
+    (print { event: "contract-resumed" })
+    (ok true)
+  )
+)
+
+(define-public (update-yield-parameters
+    (base-rate uint)
+    (bonus-rate uint)
+  )
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    (asserts! (and (<= base-rate u2000) (<= bonus-rate u500)) ERR-INVALID-AMOUNT)
+    (var-set base-yield-rate base-rate)
+    (var-set tier-bonus-rate bonus-rate)
+    (ok true)
+  )
+)
