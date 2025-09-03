@@ -391,3 +391,78 @@
     (ok true)
   )
 )
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (get-staking-position (user principal))
+  (map-get? StakingPositions user)
+)
+
+(define-read-only (get-proposal (proposal-id uint))
+  (map-get? GovernanceProposals { proposal-id: proposal-id })
+)
+
+(define-read-only (get-protocol-stats)
+  {
+    total-stx-locked: (var-get total-stx-locked),
+    proposal-count: (var-get proposal-counter),
+    contract-paused: (var-get contract-paused),
+    base-yield: (var-get base-yield-rate),
+  }
+)
+
+(define-read-only (calculate-pending-rewards (user principal))
+  (match (map-get? StakingPositions user)
+    position (let ((blocks-elapsed (- stacks-block-height (get last-claim-height position))))
+      (ok (calculate-staking-rewards position blocks-elapsed))
+    )
+    (err ERR-NO-POSITION)
+  )
+)
+
+(define-read-only (get-user-voting-power (user principal))
+  (match (map-get? StakingPositions user)
+    position (ok (calculate-voting-power position))
+    (err ERR-NO-POSITION)
+  )
+)
+
+;; PRIVATE FUNCTIONS
+
+(define-private (calculate-tier-level (stake-amount uint))
+  (if (>= stake-amount u25000000)
+    {
+      tier-level: u4,
+      reward-multiplier: u200,
+    }
+    (if (>= stake-amount u10000000)
+      {
+        tier-level: u3,
+        reward-multiplier: u150,
+      }
+      (if (>= stake-amount u5000000)
+        {
+          tier-level: u2,
+          reward-multiplier: u125,
+        }
+        {
+          tier-level: u1,
+          reward-multiplier: u100,
+        }
+      )
+    )
+  )
+)
+
+(define-private (calculate-lock-multiplier (lock-months uint))
+  (if (>= lock-months u12) ;; 12+ months
+    u175 ;; 75% bonus
+    (if (>= lock-months u6) ;; 6+ months
+      u150 ;; 50% bonus
+      (if (>= lock-months u3) ;; 3+ months
+        u125 ;; 25% bonus
+        u100 ;; No bonus
+      )
+    )
+  )
+)
