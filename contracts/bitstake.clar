@@ -236,3 +236,75 @@
     (ok true)
   )
 )
+
+(define-public (complete-unstaking)
+  (let (
+      (position (unwrap! (map-get? StakingPositions tx-sender) ERR-NO-POSITION))
+      (cooldown-start (unwrap! (get cooldown-initiated position) ERR-COOLDOWN-ACTIVE))
+      (cooldown-complete (>= (- stacks-block-height cooldown-start) (var-get unstake-cooldown)))
+    )
+    (asserts! cooldown-complete ERR-COOLDOWN-ACTIVE)
+
+    ;; Return staked STX
+    (try! (as-contract (stx-transfer? (get stx-amount position) tx-sender tx-sender)))
+
+    ;; Update global state
+    (var-set total-stx-locked
+      (- (var-get total-stx-locked) (get stx-amount position))
+    )
+
+    ;; Remove position
+    (map-delete StakingPositions tx-sender)
+
+    (print {
+      event: "unstaking-completed",
+      user: tx-sender,
+      amount: (get stx-amount position),
+    })
+    (ok true)
+  )
+)
+
+;; ----------------------------- Governance Functions ----------------------------
+(define-public (create-proposal
+    (title (string-utf8 128))
+    (description (string-utf8 512))
+    (voting-duration uint)
+  )
+  (let (
+      (position (unwrap! (map-get? StakingPositions tx-sender) ERR-UNAUTHORIZED))
+      (proposal-id (+ (var-get proposal-counter) u1))
+      (voting-power (calculate-voting-power position))
+    )
+    (asserts! (>= voting-power u1000000) ERR-UNAUTHORIZED)
+    (asserts! (and (>= (len title) u5) (<= (len title) u128))
+      ERR-INVALID-PROPOSAL
+    )
+    (asserts! (and (>= (len description) u20) (<= (len description) u512))
+      ERR-INVALID-PROPOSAL
+    )
+    (asserts! (and (>= voting-duration u144) (<= voting-duration u4320))
+      ERR-INVALID-PROPOSAL
+    )
+
+    (map-set GovernanceProposals { proposal-id: proposal-id } {
+      proposer: tx-sender,
+      title: title,
+      description: description,
+      voting-start: stacks-block-height,
+      voting-end: (+ stacks-block-height voting-duration),
+      votes-for: u0,
+      votes-against: u0,
+      executed: false,
+      quorum-required: (/ (var-get total-stx-locked) u5), ;; 20% quorum
+    })
+
+    (var-set proposal-counter proposal-id)
+    (print {
+      event: "proposal-created",
+      id: proposal-id,
+      proposer: tx-sender,
+    })
+    (ok proposal-id)
+  )
+)
