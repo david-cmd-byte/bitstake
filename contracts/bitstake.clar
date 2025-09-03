@@ -99,7 +99,7 @@
 
 ;; PUBLIC FUNCTIONS
 
-;; ----------------------------- Contract Initialization -------------------------
+;; Contract Initialization
 (define-public (initialize-protocol)
   (begin
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
@@ -138,7 +138,7 @@
   )
 )
 
-;; ------------------------------- Staking Operations ---------------------------
+;; Staking Operations
 (define-public (stake-stx
     (amount uint)
     (lock-months uint)
@@ -265,7 +265,7 @@
   )
 )
 
-;; ----------------------------- Governance Functions ----------------------------
+;; Governance Functions
 (define-public (create-proposal
     (title (string-utf8 128))
     (description (string-utf8 512))
@@ -360,7 +360,7 @@
   )
 )
 
-;; ---------------------------- Administrative Functions --------------------------
+;; Administrative Functions --------------------------
 (define-public (pause-contract)
   (begin
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
@@ -464,5 +464,64 @@
         u100 ;; No bonus
       )
     )
+  )
+)
+
+(define-private (calculate-staking-rewards
+    (position {
+      stx-amount: uint,
+      stake-height: uint,
+      last-claim-height: uint,
+      lock-duration: uint,
+      cooldown-initiated: (optional uint),
+      accumulated-rewards: uint,
+      tier-level: uint,
+      reward-multiplier: uint,
+    })
+    (blocks uint)
+  )
+  (let (
+      (base-rewards (/ (* (* (get stx-amount position) (var-get base-yield-rate)) blocks)
+        u5256000
+      )) ;; Blocks per year
+      (multiplied-rewards (/ (* base-rewards (get reward-multiplier position)) u100))
+    )
+    multiplied-rewards
+  )
+)
+
+(define-private (calculate-voting-power (position {
+  stx-amount: uint,
+  stake-height: uint,
+  last-claim-height: uint,
+  lock-duration: uint,
+  cooldown-initiated: (optional uint),
+  accumulated-rewards: uint,
+  tier-level: uint,
+  reward-multiplier: uint,
+}))
+  (let (
+      (base-power (get stx-amount position))
+      (tier-config (unwrap-panic (map-get? TierConfiguration (get tier-level position))))
+      (governance-weight (get governance-weight tier-config))
+    )
+    (* base-power governance-weight)
+  )
+)
+
+(define-private (blocks-from-months (months uint))
+  (if (is-eq months u0)
+    u0
+    (* months u4320) ;; Approximate blocks per month
+  )
+)
+
+(define-private (is-valid-lock-period (months uint))
+  (or
+    (is-eq months u0)
+    (is-eq months u3)
+    (is-eq months u6)
+    (is-eq months u12)
+    (is-eq months u24)
   )
 )
