@@ -155,3 +155,84 @@
     (asserts! (>= amount (var-get minimum-stake)) ERR-MINIMUM-NOT-MET)
     (asserts! (is-valid-lock-period lock-months) ERR-INVALID-AMOUNT)
     (asserts! (is-none existing-position) ERR-INVALID-AMOUNT)
+
+    ;; Transfer STX to contract
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+
+    ;; Create staking position
+    (map-set StakingPositions tx-sender {
+      stx-amount: amount,
+      stake-height: stacks-block-height,
+      last-claim-height: stacks-block-height,
+      lock-duration: lock-blocks,
+      cooldown-initiated: none,
+      accumulated-rewards: u0,
+      tier-level: (get tier-level tier-info),
+      reward-multiplier: (/ final-multiplier u100),
+    })
+
+    ;; Update global state
+    (var-set total-stx-locked (+ (var-get total-stx-locked) amount))
+
+    (print {
+      event: "stx-staked",
+      user: tx-sender,
+      amount: amount,
+      tier: (get tier-level tier-info),
+      lock-period: lock-months,
+    })
+    (ok true)
+  )
+)
+
+(define-public (claim-rewards)
+  (let (
+      (position (unwrap! (map-get? StakingPositions tx-sender) ERR-NO-POSITION))
+      (blocks-elapsed (- stacks-block-height (get last-claim-height position)))
+      (rewards (calculate-staking-rewards position blocks-elapsed))
+    )
+    (asserts! (> rewards u0) ERR-INVALID-AMOUNT)
+
+    ;; Mint rewards to user
+    (try! (ft-mint? BITSTAKE rewards tx-sender))
+
+    ;; Update position
+    (map-set StakingPositions tx-sender
+      (merge position {
+        last-claim-height: stacks-block-height,
+        accumulated-rewards: (+ (get accumulated-rewards position) rewards),
+      })
+    )
+
+    (print {
+      event: "rewards-claimed",
+      user: tx-sender,
+      amount: rewards,
+    })
+    (ok rewards)
+  )
+)
+
+(define-public (initiate-unstaking)
+  (let (
+      (position (unwrap! (map-get? StakingPositions tx-sender) ERR-NO-POSITION))
+      (lock-end (+ (get stake-height position) (get lock-duration position)))
+    )
+    (asserts! (>= stacks-block-height lock-end) ERR-COOLDOWN-ACTIVE)
+    (asserts! (is-none (get cooldown-initiated position)) ERR-COOLDOWN-ACTIVE)
+
+    ;; Automatically claim any pending rewards
+    (try! (claim-rewards))
+
+    ;; Start cooldown period
+    (map-set StakingPositions tx-sender
+      (merge position { cooldown-initiated: (some stacks-block-height) })
+    )
+
+    (print {
+      event: "unstaking-initiated",
+      user: tx-sender,
+    })
+    (ok true)
+  )
+)
